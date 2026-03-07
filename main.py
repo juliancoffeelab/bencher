@@ -1,6 +1,7 @@
 import os
 import queue
 import shlex
+import signal
 import subprocess
 import threading
 import time
@@ -38,7 +39,7 @@ class ProtectedData:
 
 
 # 1. Thread-safe communication
-data_queue: queue.Queue[StatData | None] = queue.Queue(maxsize=2)
+data_queue: queue.Queue[StatData | None] = queue.Queue(maxsize=0)
 stop_event = threading.Event()
 
 # Global state to track the active thread
@@ -50,35 +51,37 @@ class ExitEvent(Exception):
     pass
 
 
-def cleanup_process_tree(proc_obj):
+def cleanup_process_group(proc: subprocess.Popen):
     """
-    Terminates and kills a psutil.Process tree starting from proc_obj.
+    Terminates and kills a process group spawned with start_new_session=True.
+    This replaces the recursive psutil tree traversal.
     """
+    pid = proc.pid
     try:
-        # 1. Capture all descendants before signaling the parent
-        descendants = proc_obj.children(recursive=True)
-        all_procs = descendants + [proc_obj]
-
-        # 2. Attempt graceful termination for the entire group
-        for p in all_procs:
-            try:
-                p.terminate()
-            except psutil.NoSuchProcess:
-                pass
-
-        # 3. Wait up to 3 seconds for processes to exit
-        _gone, alive = psutil.wait_procs(all_procs, timeout=3)
-
-        # 4. Forcefully kill any processes that are still active
-        for p in alive:
-            try:
-                p.kill()
-            except psutil.NoSuchProcess:
-                pass
-
-    except psutil.NoSuchProcess:
-        # The main process object was already gone
+        if os.name == "posix":
+            os.killpg(pid, signal.SIGTERM)
+        elif os.name == "nt":
+            os.kill(pid, signal.CTRL_BREAK_EVENT)
+    except ProcessLookupError:
+        print(f"Process {pid} no longer exists")
         pass
+
+    try:
+        proc.wait(timeout=3.0)
+    except subprocess.TimeoutExpired:
+        try:
+            if os.name == "posix":
+                os.killpg(pid, signal.SIGKILL)
+            elif os.name == "nt":
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+        except ProcessLookupError:
+            print(f"Process {pid} no longer exists")
+            pass
+    print(f"Process {pid} is done")
 
 
 def data_producer(cmd_list: Any):
@@ -92,6 +95,7 @@ def data_producer(cmd_list: Any):
         text=True,
         start_new_session=True,
     )
+    print(f"Proc {proc.pid} is starting..")
 
     p = psutil.Process(proc.pid)
     p.cpu_percent(interval=None)
@@ -103,6 +107,8 @@ def data_producer(cmd_list: Any):
     # Post-mortem tracking
     peak_mem = 0.0
     start_time = time.time()
+    cpu_times = None
+    switches = None
 
     try:
         while proc.poll() is None:
@@ -142,25 +148,25 @@ def data_producer(cmd_list: Any):
                 pass
 
             time.sleep(0.5)
-    except ExitEvent:
-        print("Finished early...")
-    finally:
         total_duration = time.time() - start_time
 
         summary: StatData = {
             "kind": "summary",
             "payload": {
                 "duration": total_duration,
-                "user_time": cpu_times.user,
-                "sys_time": cpu_times.system,
+                "user_time": getattr(cpu_times, "user", 0.0),
+                "sys_time": getattr(cpu_times, "system", 0.0),
                 "peak_mem_mb": peak_mem,
-                "v_switches": switches.voluntary,
-                "iv_switches": switches.involuntary,
+                "v_switches": getattr(switches, "voluntary", 0),
+                "iv_switches": getattr(switches, "involuntary", 0),
                 "exit_code": proc.returncode,
             },
         }
         data_queue.put(summary)
-        cleanup_process_tree(p)
+    except ExitEvent:
+        print("Finished early...")
+    finally:
+        cleanup_process_group(p)
 
         proc.wait()
         data_queue.put(None)
@@ -180,6 +186,7 @@ def keyboard_callback(sender, app_data):
     if app_data == dpg.mvKey_Escape:
         print("Escape pressed. Exiting...")
         stop_event.set()
+        current_thread.get().join(timeout=3.0)
         dpg.stop_dearpygui()
     elif app_data == dpg.mvKey_Return:
         restart_process(sender, None, None)
