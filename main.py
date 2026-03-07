@@ -14,14 +14,19 @@ data_queue = queue.Queue(maxsize=2)
 
 
 def data_producer():
-    """Starts a subprocess and monitors its CPU and Memory usage."""
-    # Start a dummy process
+    """Starts a subprocess and monitors its CPU and Memory usage, then sends summary stats."""
     cmd = [
         "python",
         "fib.py",
-        "50",
+        "35",
     ]
-    proc = subprocess.Popen(cmd)
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
 
     p = psutil.Process(proc.pid)
     p.cpu_percent(interval=None)
@@ -29,6 +34,9 @@ def data_producer():
     cpu_history = []
     mem_history = []
     timestamps = []
+
+    # Post-mortem tracking
+    peak_mem = 0
     start_time = time.time()
 
     try:
@@ -36,26 +44,57 @@ def data_producer():
             current_time = time.time() - start_time
 
             cpu_val = p.cpu_percent(interval=None)
-            mem_val = p.memory_info().rss / (1024 * 1024 * 1024)  # GB
+            mem_info = p.memory_info()
+            mem_val_gb = mem_info.rss / (1024 * 1024 * 1024)
+
+            # Track peak memory
+            if mem_val_gb > peak_mem:
+                peak_mem = mem_val_gb
+
+            # Post mortem
+            cpu_times = p.cpu_times()
+            switches = p.num_ctx_switches()
 
             timestamps.append(current_time)
             cpu_history.append(cpu_val)
-            mem_history.append(mem_val)
+            mem_history.append(mem_val_gb)
 
             try:
-                # Send copies to avoid thread-safety issues
                 data_queue.put_nowait(
-                    [list(timestamps), list(cpu_history), list(mem_history)]
+                    {
+                        "type": "live",
+                        "payload": [
+                            list(timestamps),
+                            list(cpu_history),
+                            list(mem_history),
+                        ],
+                    }
                 )
             except queue.Full:
                 pass
 
             time.sleep(0.5)
+
+        # 2. Final Snapshot (Post-Mortem)
+        total_duration = time.time() - start_time
+
+        summary = {
+            "type": "summary",
+            "payload": {
+                "duration": total_duration,
+                "user_time": cpu_times.user,
+                "sys_time": cpu_times.system,
+                "peak_mem_gb": peak_mem,
+                "v_switches": switches.voluntary,
+                "iv_switches": switches.involuntary,
+                "exit_code": proc.returncode,
+            },
+        }
+        data_queue.put(summary)
+
     finally:
         if proc.poll() is None:
             proc.terminate()
-
-        # Signal that the process has finished
         data_queue.put(None)
 
 
@@ -97,7 +136,7 @@ def run_app():
     dpg.bind_theme(theme)
 
     with dpg.window(label="Dashboard", tag="main_window"):
-        dpg.add_text("Subprocess Telemetry (Full Rescaling & Monitoring Control)")
+        dpg.add_text("Process Telemetry")
         dpg.add_separator()
 
     dpg.set_primary_window("main_window", True)
@@ -108,23 +147,35 @@ def run_app():
             "y_axis": "cpu_y_axis",
             "x_axis": "x_axis_cpu",
             "label": "CPU Usage (%)",
+            "pos": [20, 100],
         },
         {
             "tag": "mem_series",
             "y_axis": "mem_y_axis",
             "x_axis": "x_axis_mem",
             "label": "Memory Usage (GB)",
+            "pos": [510, 100],
         },
     ]
 
-    for i, cfg in enumerate(plot_configs):
-        with dpg.window(
-            label=cfg["label"], width=450, height=350, pos=[i * 460 + 20, 100]
-        ):
+    for cfg in plot_configs:
+        with dpg.window(label=cfg["label"], width=470, height=350, pos=cfg["pos"]):
             with dpg.plot(height=-1, width=-1):
                 dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", tag=cfg["x_axis"])
                 dpg.add_plot_axis(dpg.mvYAxis, label=cfg["label"], tag=cfg["y_axis"])
                 dpg.add_line_series([], [], tag=cfg["tag"], parent=cfg["y_axis"])
+
+    # Summary Window (initially hidden)
+    with dpg.window(
+        label="Final Process Summary",
+        modal=True,
+        show=False,
+        tag="summary_win",
+        width=400,
+        height=300,
+        pos=[300, 200],
+    ):
+        dpg.add_text("", tag="summary_text")
 
     thread = threading.Thread(target=data_producer, daemon=True)
     thread.start()
@@ -134,22 +185,34 @@ def run_app():
     while dpg.is_dearpygui_running():
         if monitoring_active:
             try:
-                data = data_queue.get_nowait()
+                msg = data_queue.get_nowait()
 
-                if data is None:
+                if msg is None:
                     monitoring_active = False
-                    print("Process finished. Stopping updates.")
-                else:
-                    times, cpu, mem = data
-
-                    # Update series
+                elif msg["type"] == "live":
+                    times, cpu, mem = msg["payload"]
                     dpg.set_value("cpu_series", [times, cpu])
                     dpg.set_value("mem_series", [times, mem])
 
-                    # Rescale axes
                     for cfg in plot_configs:
                         dpg.fit_axis_data(cfg["x_axis"])
                         dpg.fit_axis_data(cfg["y_axis"])
+
+                elif msg["type"] == "summary":
+                    s = msg["payload"]
+                    report = (
+                        f"Execution Finished\n"
+                        f"{'-' * 30}\n"
+                        f"Total Duration:  {s['duration']:.2f}s\n"
+                        f"User CPU Time:   {s['user_time']:.2f}s\n"
+                        f"System CPU Time: {s['sys_time']:.2f}s\n"
+                        f"Peak RAM (RSS):  {s['peak_mem_gb']:.4f} GB\n"
+                        f"Voluntary Ctx:   {s['v_switches']}\n"
+                        f"Involuntary Ctx: {s['iv_switches']}\n"
+                        f"Exit Code:       {s['exit_code']}"
+                    )
+                    dpg.set_value("summary_text", report)
+                    dpg.configure_item("summary_win", show=True)
 
             except queue.Empty:
                 pass
