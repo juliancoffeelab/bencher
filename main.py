@@ -269,7 +269,7 @@ def run_app():
         dpg.add_input_text(
             label="Command",
             default_value="\
-python -c 'import time; [2**i for i in range(100000)]'\
+python3 -c 'import time; [2**i for i in range(100000)]'\
 ",
             tag="cmd_input",
             width=1000,
@@ -364,6 +364,10 @@ python -c 'import time; [2**i for i in range(100000)]'\
     dpg.destroy_context()
 
 
-if __name__ == "__main__":
+def main():
     print("Hello from bencher")
     run_app()
+
+
+if __name__ == "__main__":
+    main()
