@@ -4,11 +4,17 @@ import shlex
 import subprocess
 import threading
 import time
+from typing import Any, Literal, TypedDict
 
-import dearpygui.dearpygui as dpg
+import dearpygui.dearpygui as dpg  # type: ignore
 import psutil
-from dearpygui_ext.themes import create_theme_imgui_light
+from dearpygui_ext.themes import create_theme_imgui_light  # type: ignore
 from matplotlib import font_manager
+
+
+class StatData(TypedDict):
+    kind: Literal["live", "summary"]
+    payload: Any
 
 
 class ProtectedData:
@@ -18,6 +24,8 @@ class ProtectedData:
         self._data = initial_value
         self._lock = threading.Lock()
 
+    # TODO: needs to return a mutex guard/contextmanager on its own
+    # otherwise problematic with reference objects
     def get(self):
         """Safely retrieves the current value under a lock."""
         with self._lock:
@@ -30,7 +38,7 @@ class ProtectedData:
 
 
 # 1. Thread-safe communication
-data_queue = queue.Queue(maxsize=2)
+data_queue: queue.Queue[StatData | None] = queue.Queue(maxsize=2)
 stop_event = threading.Event()
 
 # Global state to track the active thread
@@ -73,7 +81,7 @@ def cleanup_process_tree(proc_obj):
         pass
 
 
-def data_producer(cmd_list):
+def data_producer(cmd_list: Any):
     """Starts a subprocess and monitors its CPU and Memory usage
 
     At the end, sends summary stats and signals with None."""
@@ -93,7 +101,7 @@ def data_producer(cmd_list):
     timestamps = []
 
     # Post-mortem tracking
-    peak_mem = 0
+    peak_mem = 0.0
     start_time = time.time()
 
     try:
@@ -122,7 +130,7 @@ def data_producer(cmd_list):
             try:
                 data_queue.put_nowait(
                     {
-                        "type": "live",
+                        "kind": "live",
                         "payload": [
                             list(timestamps),
                             list(cpu_history),
@@ -138,8 +146,8 @@ def data_producer(cmd_list):
         # 2. Final Snapshot (Post-Mortem)
         total_duration = time.time() - start_time
 
-        summary = {
-            "type": "summary",
+        summary: StatData = {
+            "kind": "summary",
             "payload": {
                 "duration": total_duration,
                 "user_time": cpu_times.user,
@@ -313,7 +321,7 @@ def run_app():
 
                 if msg is None:
                     monitoring_active.set(False)
-                elif msg["type"] == "live":
+                elif msg["kind"] == "live":
                     times, cpu, mem = msg["payload"]
                     dpg.set_value("cpu_series", [times, cpu])
                     dpg.set_value("mem_series", [times, mem])
@@ -322,7 +330,7 @@ def run_app():
                         dpg.fit_axis_data(cfg["x_axis"])
                         dpg.fit_axis_data(cfg["y_axis"])
 
-                elif msg["type"] == "summary":
+                elif msg["kind"] == "summary":
                     s = msg["payload"]
                     report = (
                         f"Execution Finished\n"
