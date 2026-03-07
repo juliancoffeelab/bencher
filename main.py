@@ -11,11 +11,47 @@ from matplotlib import font_manager
 
 # 1. Thread-safe communication
 data_queue = queue.Queue(maxsize=2)
+stop_event = threading.Event()
 cmd = [
     "python",
     "fib.py",
-    "35",
+    "50",
 ]
+
+
+class ExitEvent(Exception):
+    pass
+
+
+def cleanup_process_tree(proc_obj):
+    """
+    Terminates and kills a psutil.Process tree starting from proc_obj.
+    """
+    try:
+        # 1. Capture all descendants before signaling the parent
+        descendants = proc_obj.children(recursive=True)
+        all_procs = descendants + [proc_obj]
+
+        # 2. Attempt graceful termination for the entire group
+        for p in all_procs:
+            try:
+                p.terminate()
+            except psutil.NoSuchProcess:
+                pass
+
+        # 3. Wait up to 3 seconds for processes to exit
+        _gone, alive = psutil.wait_procs(all_procs, timeout=3)
+
+        # 4. Forcefully kill any processes that are still active
+        for p in alive:
+            try:
+                p.kill()
+            except psutil.NoSuchProcess:
+                pass
+
+    except psutil.NoSuchProcess:
+        # The main process object was already gone
+        pass
 
 
 def data_producer():
@@ -43,6 +79,9 @@ def data_producer():
 
     try:
         while proc.poll() is None:
+            if stop_event.is_set():
+                raise ExitEvent()
+
             current_time = time.time() - start_time
 
             cpu_val = p.cpu_percent(interval=None)
@@ -93,10 +132,12 @@ def data_producer():
             },
         }
         data_queue.put(summary)
-
+    except ExitEvent:
+        print("Finished early...")
     finally:
-        if proc.poll() is None:
-            proc.terminate()
+        cleanup_process_tree(p)
+
+        proc.wait()
         data_queue.put(None)
 
 
@@ -108,9 +149,23 @@ def initialize_gui():
     dpg.show_viewport()
 
 
+def keyboard_callback(_sender, app_data):
+    """Closes the app when Escape is pressed."""
+    # app_data is the key code
+    if app_data == dpg.mvKey_Escape:
+        print("Escape pressed. Exiting...")
+        stop_event.set()
+        dpg.stop_dearpygui()
+
+
 def run_app():
     """Main application loop."""
     initialize_gui()
+
+    with dpg.handler_registry():
+        dpg.add_key_press_handler(callback=keyboard_callback)
+
+    dpg.set_exit_callback(lambda: stop_event.set())
 
     # Font Management
     try:
@@ -180,7 +235,7 @@ def run_app():
     ):
         dpg.add_text("", tag="summary_text")
 
-    thread = threading.Thread(target=data_producer, daemon=True)
+    thread = threading.Thread(target=data_producer)
     thread.start()
 
     monitoring_active = True
