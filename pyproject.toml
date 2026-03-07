@@ -8,7 +8,6 @@ dependencies = [
     "dearpygui>=2.2",
     "dearpygui-ext>=2.0.0",
     "matplotlib>=3.10.8",
-    "plotly>=6.6.0",
     "psutil>=7.2.2",
 ]
 
@@ -18,8 +17,17 @@ dev = [
     "mypy>=1.19.1",
 ]
 
+[project.scripts]
+bencher = "main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["main.py"]
+
 [tool.mypy]
-exclude = ["src/ron/_generated/"]
 python_version = 3.14
 warn_unused_configs = true
 check_untyped_defs = true

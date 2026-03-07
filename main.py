@@ -113,11 +113,11 @@ def data_producer(cmd_list: Any):
 
             cpu_val = p.cpu_percent(interval=None)
             mem_info = p.memory_info()
-            mem_val_gb = mem_info.rss / (1024 * 1024 * 1024)
+            mem_val_mb = mem_info.rss / (1024 * 1024)
 
             # Track peak memory
-            if mem_val_gb > peak_mem:
-                peak_mem = mem_val_gb
+            if mem_val_mb > peak_mem:
+                peak_mem = mem_val_mb
 
             # Post mortem
             cpu_times = p.cpu_times()
@@ -125,7 +125,7 @@ def data_producer(cmd_list: Any):
 
             timestamps.append(current_time)
             cpu_history.append(cpu_val)
-            mem_history.append(mem_val_gb)
+            mem_history.append(mem_val_mb)
 
             try:
                 data_queue.put_nowait(
@@ -142,8 +142,9 @@ def data_producer(cmd_list: Any):
                 pass
 
             time.sleep(0.5)
-
-        # 2. Final Snapshot (Post-Mortem)
+    except ExitEvent:
+        print("Finished early...")
+    finally:
         total_duration = time.time() - start_time
 
         summary: StatData = {
@@ -152,16 +153,13 @@ def data_producer(cmd_list: Any):
                 "duration": total_duration,
                 "user_time": cpu_times.user,
                 "sys_time": cpu_times.system,
-                "peak_mem_gb": peak_mem,
+                "peak_mem_mb": peak_mem,
                 "v_switches": switches.voluntary,
                 "iv_switches": switches.involuntary,
                 "exit_code": proc.returncode,
             },
         }
         data_queue.put(summary)
-    except ExitEvent:
-        print("Finished early...")
-    finally:
         cleanup_process_tree(p)
 
         proc.wait()
@@ -176,13 +174,15 @@ def initialize_gui():
     dpg.show_viewport()
 
 
-def keyboard_callback(_sender, app_data):
+def keyboard_callback(sender, app_data):
     """Closes the app when Escape is pressed."""
     # app_data is the key code
     if app_data == dpg.mvKey_Escape:
         print("Escape pressed. Exiting...")
         stop_event.set()
         dpg.stop_dearpygui()
+    elif app_data == dpg.mvKey_Return:
+        restart_process(sender, None, None)
 
 
 def restart_process(_sender, _app_data, _user_data):
@@ -261,11 +261,14 @@ def run_app():
         # UI Additions for dynamic restarts
         dpg.add_input_text(
             label="Command",
-            default_value="python fib.py 50",
+            default_value="\
+python -c 'import time; [2**i for i in range(100000)]'\
+",
             tag="cmd_input",
-            width=300,
+            width=1000,
         )
         dpg.add_button(label="Run / Restart", callback=restart_process)
+        dpg.add_button(label="Stop", callback=lambda: stop_event.set())
 
         dpg.add_separator()
 
@@ -283,7 +286,7 @@ def run_app():
             "tag": "mem_series",
             "y_axis": "mem_y_axis",
             "x_axis": "x_axis_mem",
-            "label": "Memory Usage (GB)",
+            "label": "Memory Usage (MB)",
             "pos": [510, 150],  # Shifted Y position down
         },
     ]
@@ -338,7 +341,7 @@ def run_app():
                         f"Total Duration:  {s['duration']:.2f}s\n"
                         f"User CPU Time:   {s['user_time']:.2f}s\n"
                         f"System CPU Time: {s['sys_time']:.2f}s\n"
-                        f"Peak RAM (RSS):  {s['peak_mem_gb']:.4f} GB\n"
+                        f"Peak RAM (RSS):  {s['peak_mem_mb']:.4f} MB\n"
                         f"Voluntary Ctx:   {s['v_switches']}\n"
                         f"Involuntary Ctx: {s['iv_switches']}\n"
                         f"Exit Code:       {s['exit_code']}"
