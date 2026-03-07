@@ -1,5 +1,6 @@
 import os
 import queue
+import shlex
 import subprocess
 import threading
 import time
@@ -9,14 +10,32 @@ import psutil
 from dearpygui_ext.themes import create_theme_imgui_light
 from matplotlib import font_manager
 
+
+class ProtectedData:
+    """A thread-safe wrapper encapsulating data and its associated mutex."""
+
+    def __init__(self, initial_value=None):
+        self._data = initial_value
+        self._lock = threading.Lock()
+
+    def get(self):
+        """Safely retrieves the current value under a lock."""
+        with self._lock:
+            return self._data
+
+    def set(self, value):
+        """Safely updates the value under a lock."""
+        with self._lock:
+            self._data = value
+
+
 # 1. Thread-safe communication
 data_queue = queue.Queue(maxsize=2)
 stop_event = threading.Event()
-cmd = [
-    "python",
-    "fib.py",
-    "50",
-]
+
+# Global state to track the active thread
+current_thread = ProtectedData(None)
+monitoring_active = ProtectedData(False)
 
 
 class ExitEvent(Exception):
@@ -54,12 +73,12 @@ def cleanup_process_tree(proc_obj):
         pass
 
 
-def data_producer():
+def data_producer(cmd_list):
     """Starts a subprocess and monitors its CPU and Memory usage
 
     At the end, sends summary stats and signals with None."""
     proc = subprocess.Popen(
-        cmd,
+        cmd_list,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -158,6 +177,42 @@ def keyboard_callback(_sender, app_data):
         dpg.stop_dearpygui()
 
 
+def restart_process(_sender, _app_data, _user_data):
+    """Callback to handle process restarts cleanly."""
+    # 1. Signal and wait for the old process to stop
+    stop_event.set()
+    if current_thread.get() and current_thread.get().is_alive():
+        current_thread.get().join(timeout=2.0)
+
+    # 2. Flush the queue to prevent drawing stale data
+    while not data_queue.empty():
+        try:
+            data_queue.get_nowait()
+        except queue.Empty:
+            break
+
+    # 3. Reset synchronization states and GUI elements
+    stop_event.clear()
+    dpg.set_value("cpu_series", [[], []])
+    dpg.set_value("mem_series", [[], []])
+    dpg.configure_item("summary_win", show=False)
+
+    # 4. Parse the new command
+    cmd_str = dpg.get_value("cmd_input")
+    try:
+        cmd_list = shlex.split(cmd_str)
+    except ValueError:
+        cmd_list = cmd_str.split()
+
+    if not cmd_list:
+        return
+
+    # 5. Launch the new thread
+    monitoring_active.set(True)
+    current_thread.set(threading.Thread(target=data_producer, args=(cmd_list,)))
+    current_thread.get().start()
+
+
 def run_app():
     """Main application loop."""
     initialize_gui()
@@ -194,7 +249,16 @@ def run_app():
 
     with dpg.window(label="Dashboard", tag="main_window"):
         dpg.add_text("Process Telemetry")
-        dpg.add_text(" ".join(cmd))
+
+        # UI Additions for dynamic restarts
+        dpg.add_input_text(
+            label="Command",
+            default_value="python fib.py 50",
+            tag="cmd_input",
+            width=300,
+        )
+        dpg.add_button(label="Run / Restart", callback=restart_process)
+
         dpg.add_separator()
 
     dpg.set_primary_window("main_window", True)
@@ -205,14 +269,14 @@ def run_app():
             "y_axis": "cpu_y_axis",
             "x_axis": "x_axis_cpu",
             "label": "CPU Usage (%)",
-            "pos": [20, 100],
+            "pos": [20, 150],  # Shifted Y position down to accommodate inputs
         },
         {
             "tag": "mem_series",
             "y_axis": "mem_y_axis",
             "x_axis": "x_axis_mem",
             "label": "Memory Usage (GB)",
-            "pos": [510, 100],
+            "pos": [510, 150],  # Shifted Y position down
         },
     ]
 
@@ -235,18 +299,20 @@ def run_app():
     ):
         dpg.add_text("", tag="summary_text")
 
-    thread = threading.Thread(target=data_producer)
-    thread.start()
-
-    monitoring_active = True
+    # Initial start
+    cmd_str = dpg.get_value("cmd_input")
+    initial_cmd = shlex.split(cmd_str)
+    monitoring_active.set(True)
+    current_thread.set(threading.Thread(target=data_producer, args=(initial_cmd,)))
+    current_thread.get().start()
 
     while dpg.is_dearpygui_running():
-        if monitoring_active:
+        if monitoring_active.get():
             try:
                 msg = data_queue.get_nowait()
 
                 if msg is None:
-                    monitoring_active = False
+                    monitoring_active.set(False)
                 elif msg["type"] == "live":
                     times, cpu, mem = msg["payload"]
                     dpg.set_value("cpu_series", [times, cpu])
