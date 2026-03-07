@@ -1,8 +1,11 @@
+import os
+
 import dearpygui.dearpygui as dpg
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 from dearpygui_ext.themes import create_theme_imgui_light
+from matplotlib import font_manager
 
 # Use a non-interactive backend to ensure the buffer is captured without pop-ups
 matplotlib.use("Agg")
@@ -50,14 +53,39 @@ def run_app():
     theme = create_theme_imgui_light()
     dpg.bind_theme(theme)
 
-    # 3. Get hardware scaling ratio after viewport is live
+    # 3. Load System Font Cross-Platform
+    try:
+        # Try a specific list of common system fonts if 'sans-serif' fails
+        families = ["Helvetica", "DejaVu Sans", "Verdana", "Geneva"]
+        font_path = None
+
+        for family in families:
+            path = font_manager.findfont(font_manager.FontProperties(family=family))
+            if os.path.exists(path) and "ttf" in path.lower():
+                font_path = path
+                print(f"Found font: {path}")
+                break
+
+        # Absolute fallback: just get the first system font found if names fail
+        if not font_path:
+            raise RuntimeError("no fonts")
+
+        with dpg.font_registry():
+            system_font = dpg.add_font(font_path, 20)
+            dpg.bind_font(system_font)
+    except Exception:
+        print("Couldn't find the font, going back to default")
+        dpg.set_global_font_scale(2)
+        pass
+
+    # 4. Get hardware scaling ratio after viewport is live
     ratio = dpg.get_app_configuration().get("pixel_ratio", 1.0)
 
-    # 4. Generate initial plot data
-    fig, ax = create_plot([0, 1, 2, 3], [10, 25, 15, 30])
+    # 5. Generate initial plot data
+    fig, _ax = create_plot([0, 1, 2, 3], [10, 25, 15, 30])
     pixel_data, w, h = get_texture_data(fig)
 
-    # 5. Register Texture
+    # 6. Register Texture
     with dpg.texture_registry():
         dpg.add_raw_texture(
             width=w,
@@ -67,7 +95,7 @@ def run_app():
             tag="plot_texture",
         )
 
-    # 6. Build UI
+    # 7. Build UI
     with dpg.window(label="Dashboard", tag="main_window"):
         dpg.add_text("Embedded Matplotlib Figure")
         dpg.add_image(
@@ -78,7 +106,7 @@ def run_app():
 
     dpg.set_primary_window("main_window", True)
 
-    # 7. Start Render Loop
+    # 8. Start Render Loop
     while dpg.is_dearpygui_running():
         dpg.render_dearpygui_frame()
 
@@ -86,4 +114,5 @@ def run_app():
 
 
 if __name__ == "__main__":
+    print("Hello from bencher")
     run_app()
