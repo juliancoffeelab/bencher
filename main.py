@@ -1,10 +1,11 @@
 import os
 import queue
+import subprocess
 import threading
 import time
 
 import dearpygui.dearpygui as dpg
-import numpy as np
+import psutil
 from dearpygui_ext.themes import create_theme_imgui_light
 from matplotlib import font_manager
 
@@ -12,46 +13,61 @@ from matplotlib import font_manager
 data_queue = queue.Queue(maxsize=2)
 
 
-def data_producer(x_data):
-    """Mock background thread generating sine data."""
-    frame = 0
-    while True:
-        y_offset = frame * 0.1
-        series_data = []
+def data_producer():
+    """Starts a subprocess and monitors its CPU and Memory usage."""
+    # Start a dummy process
+    cmd = [
+        "python",
+        "-c",
+        "import time; [i**2 for i in range(1000000)]; time.sleep(100)",
+    ]
+    proc = subprocess.Popen(cmd)
 
-        # Calculate for both series
-        for idx in range(2):
-            y_vals = (np.sin(np.array(x_data) + y_offset + (idx * np.pi / 2))).tolist()
-            series_data.append(y_vals)
+    p = psutil.Process(proc.pid)
+    p.cpu_percent(interval=None)
 
-        # Push to queue (non-blocking or overwrite if full)
-        try:
-            data_queue.put_nowait(series_data)
-        except queue.Full:
-            pass
+    cpu_history = []
+    mem_history = []
+    timestamps = []
+    start_time = time.time()
 
-        frame += 1
-        time.sleep(0.016)  # Mock ~60Hz data rate
+    try:
+        while proc.poll() is None:
+            current_time = time.time() - start_time
+
+            cpu_val = p.cpu_percent(interval=None)
+            mem_val = p.memory_info().rss / (1024 * 1024 * 1024)  # GB
+
+            timestamps.append(current_time)
+            cpu_history.append(cpu_val)
+            mem_history.append(mem_val)
+
+            try:
+                data_queue.put_nowait(
+                    [list(timestamps), list(cpu_history), list(mem_history)]
+                )
+            except queue.Full:
+                pass
+
+            time.sleep(0.5)
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
 
 
 def initialize_gui():
     """Sets up the DPG context and viewport."""
     dpg.create_context()
-    dpg.create_viewport(title="Structured Plotting", width=1000, height=600)
+    dpg.create_viewport(title="Process Resource Monitor", width=1000, height=600)
     dpg.setup_dearpygui()
     dpg.show_viewport()
 
 
 def run_app():
     """Main application loop."""
-    # 1. Initialize Context
     initialize_gui()
 
-    # 2. Apply Theme
-    theme = create_theme_imgui_light()
-    dpg.bind_theme(theme)
-
-    # 3. Load System Font
+    # Restored Font Management
     try:
         families = ["Helvetica", "DejaVu Sans", "Verdana", "Geneva"]
         font_path = None
@@ -61,54 +77,67 @@ def run_app():
                 font_path = path
                 print(f"Found font:\n{font_path}")
                 break
-        if not font_path:
+
+        if font_path:
+            with dpg.font_registry():
+                system_font = dpg.add_font(font_path, 20)
+                dpg.bind_font(system_font)
+        else:
             raise RuntimeError("Required fonts not found.")
-        with dpg.font_registry():
-            system_font = dpg.add_font(font_path, 20)
-            dpg.bind_font(system_font)
+
     except Exception:
         print("Couldn't find any system font, fallback to 1.5 scale")
         dpg.set_global_font_scale(1.5)
 
-    # 4. Build Primary Dashboard
+    theme = create_theme_imgui_light()
+    dpg.bind_theme(theme)
+
     with dpg.window(label="Dashboard", tag="main_window"):
-        dpg.add_text("Automated GPU Plotting (Dual Series - Threaded)")
+        dpg.add_text("Subprocess Telemetry (Full Rescaling & Diagnostics)")
         dpg.add_separator()
 
     dpg.set_primary_window("main_window", True)
 
-    # Tracking variables
-    active_series = []
-    x_data = np.linspace(0, 10, 100).tolist()
-    total_initial_plots = 2
+    # Plot configuration for dynamic access
+    plot_configs = [
+        {
+            "tag": "cpu_series",
+            "y_axis": "cpu_y_axis",
+            "x_axis": "x_axis_cpu",
+            "label": "CPU Usage (%)",
+        },
+        {
+            "tag": "mem_series",
+            "y_axis": "mem_y_axis",
+            "x_axis": "x_axis_mem",
+            "label": "Memory Usage (GB)",
+        },
+    ]
 
-    # 5. Pre-spawn Two Plots Automatically
-    for i in range(1, total_initial_plots + 1):
-        s_tag = f"series_{i}"
-        active_series.append(s_tag)
-
+    for i, cfg in enumerate(plot_configs):
         with dpg.window(
-            label=f"Plot Window {i}",
-            width=450,
-            height=350,
-            pos=[(i - 1) * 460 + 20, 100],
+            label=cfg["label"], width=450, height=350, pos=[i * 460 + 20, 100]
         ):
             with dpg.plot(height=-1, width=-1):
-                dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)")
-                y_axis = dpg.add_plot_axis(dpg.mvYAxis, label="Amplitude")
-                dpg.add_line_series(x_data, [], tag=s_tag, parent=y_axis)
+                dpg.add_plot_axis(dpg.mvXAxis, label="Time (s)", tag=cfg["x_axis"])
+                dpg.add_plot_axis(dpg.mvYAxis, label=cfg["label"], tag=cfg["y_axis"])
+                dpg.add_line_series([], [], tag=cfg["tag"], parent=cfg["y_axis"])
 
-    # --- Start the background thread ---
-    thread = threading.Thread(target=data_producer, args=(x_data,), daemon=True)
+    thread = threading.Thread(target=data_producer, daemon=True)
     thread.start()
 
-    # 6. Main Render Loop
     while dpg.is_dearpygui_running():
-        # Grab data from the thread if available
         try:
-            latest_data = data_queue.get_nowait()
-            for idx, tag in enumerate(active_series):
-                dpg.set_value(tag, [x_data, latest_data[idx]])
+            times, cpu, mem = data_queue.get_nowait()
+
+            dpg.set_value("cpu_series", [times, cpu])
+            dpg.set_value("mem_series", [times, mem])
+
+            # Rescale both X and Y axes automatically
+            for cfg in plot_configs:
+                dpg.set_axis_limits_auto(cfg["x_axis"])
+                dpg.set_axis_limits_auto(cfg["y_axis"])
+
         except queue.Empty:
             pass
 
