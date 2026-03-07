@@ -19,11 +19,12 @@ def data_producer():
     cmd = [
         "python",
         "-c",
-        "import time; [i**2 for i in range(1000000)]; time.sleep(100)",
+        "import time; [i**2 for i in range(10000000)]; time.sleep(100)",
     ]
     proc = subprocess.Popen(cmd)
 
     p = psutil.Process(proc.pid)
+    # Initial call to set the base for cpu_percent
     p.cpu_percent(interval=None)
 
     cpu_history = []
@@ -43,6 +44,7 @@ def data_producer():
             mem_history.append(mem_val)
 
             try:
+                # Send copies of the lists to avoid thread-safety issues during rendering
                 data_queue.put_nowait(
                     [list(timestamps), list(cpu_history), list(mem_history)]
                 )
@@ -67,7 +69,7 @@ def run_app():
     """Main application loop."""
     initialize_gui()
 
-    # Restored Font Management
+    # Font Management
     try:
         families = ["Helvetica", "DejaVu Sans", "Verdana", "Geneva"]
         font_path = None
@@ -75,7 +77,7 @@ def run_app():
             path = font_manager.findfont(font_manager.FontProperties(family=family))
             if os.path.exists(path) and "ttf" in path.lower():
                 font_path = path
-                print(f"Found font:\n{font_path}")
+                print(f"Found font: {font_path}")
                 break
 
         if font_path:
@@ -128,15 +130,17 @@ def run_app():
 
     while dpg.is_dearpygui_running():
         try:
+            # Attempt to get the latest data from the producer thread
             times, cpu, mem = data_queue.get_nowait()
 
+            # Update the series data
             dpg.set_value("cpu_series", [times, cpu])
             dpg.set_value("mem_series", [times, mem])
 
-            # Rescale both X and Y axes automatically
+            # Explicitly fit the axes to the data to prevent "vanishing" lines
             for cfg in plot_configs:
-                dpg.set_axis_limits_auto(cfg["x_axis"])
-                dpg.set_axis_limits_auto(cfg["y_axis"])
+                dpg.fit_axis_data(cfg["x_axis"])
+                dpg.fit_axis_data(cfg["y_axis"])
 
         except queue.Empty:
             pass
