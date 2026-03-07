@@ -11,15 +11,17 @@ from matplotlib import font_manager
 
 # 1. Thread-safe communication
 data_queue = queue.Queue(maxsize=2)
+cmd = [
+    "python",
+    "fib.py",
+    "35",
+]
 
 
 def data_producer():
-    """Starts a subprocess and monitors its CPU and Memory usage, then sends summary stats."""
-    cmd = [
-        "python",
-        "fib.py",
-        "35",
-    ]
+    """Starts a subprocess and monitors its CPU and Memory usage
+
+    At the end, sends summary stats and signals with None."""
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.PIPE,
@@ -137,6 +139,7 @@ def run_app():
 
     with dpg.window(label="Dashboard", tag="main_window"):
         dpg.add_text("Process Telemetry")
+        dpg.add_text(" ".join(cmd))
         dpg.add_separator()
 
     dpg.set_primary_window("main_window", True)
