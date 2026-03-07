@@ -2,6 +2,7 @@ import dearpygui.dearpygui as dpg
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from dearpygui_ext.themes import create_theme_imgui_light
 
 # Use a non-interactive backend to ensure the buffer is captured without pop-ups
 matplotlib.use("Agg")
@@ -45,14 +46,18 @@ def run_app():
     # 1. Initialize
     initialize_gui()
 
-    # 2. Get hardware scaling ratio after viewport is live
+    # 2. Apply Theme
+    theme = create_theme_imgui_light()
+    dpg.bind_theme(theme)
+
+    # 3. Get hardware scaling ratio after viewport is live
     ratio = dpg.get_app_configuration().get("pixel_ratio", 1.0)
 
-    # 3. Generate initial plot data
+    # 4. Generate initial plot data
     fig, ax = create_plot([0, 1, 2, 3], [10, 25, 15, 30])
     pixel_data, w, h = get_texture_data(fig)
 
-    # 4. Register Texture
+    # 5. Register Texture
     with dpg.texture_registry():
         dpg.add_raw_texture(
             width=w,
@@ -62,7 +67,7 @@ def run_app():
             tag="plot_texture",
         )
 
-    # 5. Build UI
+    # 6. Build UI
     with dpg.window(label="Dashboard", tag="main_window"):
         dpg.add_text("Embedded Matplotlib Figure")
         dpg.add_image(
@@ -73,7 +78,7 @@ def run_app():
 
     dpg.set_primary_window("main_window", True)
 
-    # 6. Start Render Loop
+    # 7. Start Render Loop
     while dpg.is_dearpygui_running():
         dpg.render_dearpygui_frame()
 
