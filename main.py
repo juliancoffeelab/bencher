@@ -18,13 +18,12 @@ def data_producer():
     # Start a dummy process
     cmd = [
         "python",
-        "-c",
-        "import time; [i**2 for i in range(10000000)]; time.sleep(100)",
+        "fib.py",
+        "50",
     ]
     proc = subprocess.Popen(cmd)
 
     p = psutil.Process(proc.pid)
-    # Initial call to set the base for cpu_percent
     p.cpu_percent(interval=None)
 
     cpu_history = []
@@ -44,7 +43,7 @@ def data_producer():
             mem_history.append(mem_val)
 
             try:
-                # Send copies of the lists to avoid thread-safety issues during rendering
+                # Send copies to avoid thread-safety issues
                 data_queue.put_nowait(
                     [list(timestamps), list(cpu_history), list(mem_history)]
                 )
@@ -55,6 +54,9 @@ def data_producer():
     finally:
         if proc.poll() is None:
             proc.terminate()
+
+        # Signal that the process has finished
+        data_queue.put(None)
 
 
 def initialize_gui():
@@ -95,12 +97,11 @@ def run_app():
     dpg.bind_theme(theme)
 
     with dpg.window(label="Dashboard", tag="main_window"):
-        dpg.add_text("Subprocess Telemetry (Full Rescaling & Diagnostics)")
+        dpg.add_text("Subprocess Telemetry (Full Rescaling & Monitoring Control)")
         dpg.add_separator()
 
     dpg.set_primary_window("main_window", True)
 
-    # Plot configuration for dynamic access
     plot_configs = [
         {
             "tag": "cpu_series",
@@ -128,22 +129,30 @@ def run_app():
     thread = threading.Thread(target=data_producer, daemon=True)
     thread.start()
 
+    monitoring_active = True
+
     while dpg.is_dearpygui_running():
-        try:
-            # Attempt to get the latest data from the producer thread
-            times, cpu, mem = data_queue.get_nowait()
+        if monitoring_active:
+            try:
+                data = data_queue.get_nowait()
 
-            # Update the series data
-            dpg.set_value("cpu_series", [times, cpu])
-            dpg.set_value("mem_series", [times, mem])
+                if data is None:
+                    monitoring_active = False
+                    print("Process finished. Stopping updates.")
+                else:
+                    times, cpu, mem = data
 
-            # Explicitly fit the axes to the data to prevent "vanishing" lines
-            for cfg in plot_configs:
-                dpg.fit_axis_data(cfg["x_axis"])
-                dpg.fit_axis_data(cfg["y_axis"])
+                    # Update series
+                    dpg.set_value("cpu_series", [times, cpu])
+                    dpg.set_value("mem_series", [times, mem])
 
-        except queue.Empty:
-            pass
+                    # Rescale axes
+                    for cfg in plot_configs:
+                        dpg.fit_axis_data(cfg["x_axis"])
+                        dpg.fit_axis_data(cfg["y_axis"])
+
+            except queue.Empty:
+                pass
 
         dpg.render_dearpygui_frame()
 
