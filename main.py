@@ -148,6 +148,7 @@ def data_producer(cmd_list: Any):
                 pass
 
             time.sleep(0.5)
+        stdout, stderr = proc.communicate(timeout=1)
         total_duration = time.time() - start_time
 
         summary: StatData = {
@@ -160,6 +161,8 @@ def data_producer(cmd_list: Any):
                 "v_switches": getattr(switches, "voluntary", 0),
                 "iv_switches": getattr(switches, "involuntary", 0),
                 "exit_code": proc.returncode,
+                "stdout": stdout,
+                "stderr": stderr,
             },
         }
         data_queue.put(summary)
@@ -351,7 +354,9 @@ python3 -c 'import time; [2**i for i in range(100000)]'\
                         f"Peak RAM (RSS):  {s['peak_mem_mb']:.4f} MB\n"
                         f"Voluntary Ctx:   {s['v_switches']}\n"
                         f"Involuntary Ctx: {s['iv_switches']}\n"
-                        f"Exit Code:       {s['exit_code']}"
+                        f"Exit Code:       {s['exit_code']}\n"
+                        f"stdout: {s['stdout']}\n"
+                        f"stderr: {s['stderr']}\n"
                     )
                     dpg.set_value("summary_text", report)
                     dpg.configure_item("summary_win", show=True)
