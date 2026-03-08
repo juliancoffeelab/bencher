@@ -196,7 +196,7 @@ def data_producer(cmd_list: Any):
             except queue.Full:
                 pass
 
-            time.sleep(0.5)
+            time.sleep(0.1)
         try:
             stdout = proc.stdout.read()
             stderr = proc.stderr.read()
