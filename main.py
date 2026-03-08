@@ -241,14 +241,18 @@ def initialize_gui():
     dpg.show_viewport()
 
 
+def finish():
+    print("Escape pressed. Exiting...")
+    stop_event.set()
+    current_thread.get().join(timeout=3.0)
+    dpg.stop_dearpygui()
+
+
 def keyboard_callback(sender, app_data):
     """Closes the app when Escape is pressed."""
     # app_data is the key code
     if app_data == dpg.mvKey_Escape:
-        print("Escape pressed. Exiting...")
-        stop_event.set()
-        current_thread.get().join(timeout=3.0)
-        dpg.stop_dearpygui()
+        finish()
     elif app_data == dpg.mvKey_Return:
         restart_process(sender, None, None)
 
@@ -296,7 +300,7 @@ def run_app():
     with dpg.handler_registry():
         dpg.add_key_press_handler(callback=keyboard_callback)
 
-    dpg.set_exit_callback(lambda: stop_event.set())
+    dpg.set_exit_callback(finish)
 
     # Font Management
     try:
