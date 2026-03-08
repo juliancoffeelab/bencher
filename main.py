@@ -1,3 +1,4 @@
+import fcntl
 import os
 import queue
 import shlex
@@ -95,6 +96,11 @@ def data_producer(cmd_list: Any):
         text=True,
         start_new_session=True,
     )
+    for pipe in [proc.stdout, proc.stderr]:
+        if pipe:
+            fd = pipe.fileno()
+            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
     print(f"Proc {proc.pid} is starting..")
 
     # Initialize the primary psutil Process object
@@ -192,9 +198,11 @@ def data_producer(cmd_list: Any):
 
             time.sleep(0.5)
         try:
-            stdout, stderr = proc.communicate(timeout=0.0)
-        except subprocess.TimeoutExpired:
-            stdout, stderr = "[didnt finish]", "[didnt finish]"
+            stdout = proc.stdout.read()
+            stderr = proc.stderr.read()
+        except BlockingIOError:
+            stdout, stderr = "[didn't finish]", "[didn't finish]"
+
         total_duration = time.time() - start_time
 
         summary: StatData = {
