@@ -5,6 +5,12 @@ its resource usage (only CPU and Memory for now).
 
 Yes, heavily vibecoded.
 
+# Installation
+Use `uv tool`, or `pipx`
+```bash
+uv tool install --from git+https://github.com/juliancoffeelab/bencher.git bencher
+```
+
 # Screenshots
 <img width="1022" height="650" alt="simple example of running Python Fibonacci script, shows cpu and memory" src="https://github.com/user-attachments/assets/c1704093-4205-41b0-9088-bf2cda734b2d" />
 <img width="991" height="621" alt="example of summary, shows total duration, peak memory and other stats" src="https://github.com/user-attachments/assets/f0a80b0e-8772-4c13-a49e-a4df834db64a" />
@@ -14,7 +20,4 @@ Yes, heavily vibecoded.
 # TODO
 Maybe add CI and publish it to pypi?
 
-Meanwhile, should be good to go with:
-```bash
-uv tool install --from git+https://github.com/juliancoffeelab/bencher.git bencher
-```
+P.s. when adding CI would be nice to run mypy over matrix of all OS-s

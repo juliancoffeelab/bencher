@@ -4,6 +4,7 @@ import queue
 import shlex
 import signal
 import subprocess
+import sys
 import threading
 import time
 from typing import Any, Literal, TypedDict
@@ -59,10 +60,10 @@ def cleanup_process_group(proc: subprocess.Popen):
     """
     pid = proc.pid
     try:
-        if os.name == "posix":
-            os.killpg(pid, signal.SIGTERM)
-        elif os.name == "nt":
+        if sys.platform == "win32":
             os.kill(pid, signal.CTRL_BREAK_EVENT)
+        else:
+            os.killpg(pid, signal.SIGTERM)
     except ProcessLookupError:
         print(f"Process {pid} no longer exists")
         pass
@@ -71,14 +72,14 @@ def cleanup_process_group(proc: subprocess.Popen):
         proc.wait(timeout=3.0)
     except subprocess.TimeoutExpired:
         try:
-            if os.name == "posix":
-                os.killpg(pid, signal.SIGKILL)
-            elif os.name == "nt":
+            if sys.platform == "win32":
                 subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(pid)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                 )
+            else:
+                os.killpg(pid, signal.SIGKILL)
         except ProcessLookupError:
             print(f"Process {pid} no longer exists")
             pass
@@ -99,8 +100,7 @@ def data_producer(cmd_list: Any):
     for pipe in [proc.stdout, proc.stderr]:
         if pipe:
             fd = pipe.fileno()
-            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
-            fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            os.set_blocking(fd, False)
     print(f"Proc {proc.pid} is starting..")
 
     # Initialize the primary psutil Process object
@@ -198,9 +198,12 @@ def data_producer(cmd_list: Any):
 
             time.sleep(0.1)
         try:
+            assert proc.stdout is not None
+            assert proc.stderr is not None
+
             stdout = proc.stdout.read()
             stderr = proc.stderr.read()
-        except BlockingIOError:
+        except BlockingIOError, AssertionError:
             stdout, stderr = "[didn't finish]", "[didn't finish]"
 
         total_duration = time.time() - start_time
@@ -227,7 +230,7 @@ def data_producer(cmd_list: Any):
     except ExitEvent:
         print("Finished early...")
     finally:
-        cleanup_process_group(parent)
+        cleanup_process_group(proc)
 
         proc.wait()
         data_queue.put(None)
