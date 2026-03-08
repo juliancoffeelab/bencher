@@ -106,6 +106,7 @@ def data_producer(cmd_list: Any):
 
     # Post-mortem tracking
     peak_mem = 0.0
+    peak_cpu = 0.0
     start_time = time.time()
 
     # Store aggregated totals for the final summary
@@ -124,10 +125,13 @@ def data_producer(cmd_list: Any):
             try:
                 # Gather the parent and all descendants
                 descendants = parent.children(recursive=True)
-                # Add them, but never clea
+                # Add them, but never clear
                 #
                 # It's sort of a leak, but we don't expect you to spawn
                 # billion processes.
+                #
+                # If we don't store all of them, we fail to catch short-lived
+                # processes like these spawned by Rust's cargo, for example.
                 all_processes |= set(descendants)
 
                 current_cpu_sum = 0.0
@@ -160,6 +164,8 @@ def data_producer(cmd_list: Any):
 
                 if current_mem_sum > peak_mem:
                     peak_mem = current_mem_sum
+                if current_cpu_sum > peak_cpu:
+                    peak_cpu = current_cpu_sum
 
                 # Update the last known good statistics
                 last_cpu_times = (temp_user_time, temp_sys_time)
@@ -198,6 +204,7 @@ def data_producer(cmd_list: Any):
                 "user_time": last_cpu_times[0] if last_cpu_times else 0.0,
                 "sys_time": last_cpu_times[1] if last_cpu_times else 0.0,
                 "peak_mem_mb": peak_mem,
+                "peak_cpu": peak_cpu,
                 "v_switches": last_switches[0] if last_switches else 0,
                 "iv_switches": last_switches[1] if last_switches else 0,
                 "exit_code": proc.returncode,
@@ -394,7 +401,8 @@ python3 -c 'import time; [2**i for i in range(100000)]'\
                         f"Total Duration:  {s['duration']:.2f}s\n"
                         f"User CPU Time:   {s['user_time']:.2f}s\n"
                         f"System CPU Time: {s['sys_time']:.2f}s\n"
-                        f"Peak RAM (RSS):  {s['peak_mem_mb']:.4f} MB\n"
+                        f"Peak RAM (RSS):  {s['peak_mem_mb']:.2f} MB\n"
+                        f"Peak CPU:        {int(s['peak_cpu'])}% (100% = 1 core)\n"
                         f"Voluntary Ctx:   {s['v_switches']}\n"
                         f"Involuntary Ctx: {s['iv_switches']}\n"
                         f"Exit Code:       {s['exit_code']}\n"
