@@ -113,6 +113,7 @@ def data_producer(cmd_list: Any):
     last_switches = None
 
     try:
+        all_processes = {parent}
         while proc.poll() is None:
             if stop_event.is_set():
                 # NOTE: don't forget to raise at the end of the loop
@@ -123,7 +124,11 @@ def data_producer(cmd_list: Any):
             try:
                 # Gather the parent and all descendants
                 descendants = parent.children(recursive=True)
-                all_processes = [parent] + descendants
+                # Add them, but never clea
+                #
+                # It's sort of a leak, but we don't expect you to spawn
+                # billion processes.
+                all_processes |= set(descendants)
 
                 current_cpu_sum = 0.0
                 current_mem_sum = 0.0
