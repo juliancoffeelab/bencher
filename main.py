@@ -97,8 +97,8 @@ def data_producer(cmd_list: Any):
     )
     print(f"Proc {proc.pid} is starting..")
 
-    p = psutil.Process(proc.pid)
-    p.cpu_percent(interval=None)
+    # Initialize the primary psutil Process object
+    parent = psutil.Process(proc.pid)
 
     cpu_history = []
     mem_history = []
@@ -107,33 +107,63 @@ def data_producer(cmd_list: Any):
     # Post-mortem tracking
     peak_mem = 0.0
     start_time = time.time()
-    cpu_times = None
-    switches = None
+
+    # Store aggregated totals for the final summary
+    last_cpu_times = None
+    last_switches = None
 
     try:
         while proc.poll() is None:
             if stop_event.is_set():
-                raise ExitEvent()
+                # NOTE: don't forget to raise at the end of the loop
+                break
 
             current_time = time.time() - start_time
 
-            cpu_val = p.cpu_percent(interval=None)
-            mem_info = p.memory_info()
-            mem_val_mb = mem_info.rss / (1024 * 1024)
-
-            # Track peak memory
-            if mem_val_mb > peak_mem:
-                peak_mem = mem_val_mb
-
-            # Post mortem
-            cpu_times = p.cpu_times()
-            switches = p.num_ctx_switches()
-
-            timestamps.append(current_time)
-            cpu_history.append(cpu_val)
-            mem_history.append(mem_val_mb)
-
             try:
+                # Gather the parent and all descendants
+                descendants = parent.children(recursive=True)
+                all_processes = [parent] + descendants
+
+                current_cpu_sum = 0.0
+                current_mem_sum = 0.0
+
+                # Temporary containers for aggregated summary data
+                temp_user_time = 0.0
+                temp_sys_time = 0.0
+                temp_v_switches = 0
+                temp_iv_switches = 0
+
+                for p in all_processes:
+                    try:
+                        # Summing metrics across the tree
+                        current_cpu_sum += p.cpu_percent(interval=None)
+                        current_mem_sum += p.memory_info().rss / (1024 * 1024)
+
+                        # Accumulate time and switch data
+                        c_times = p.cpu_times()
+                        temp_user_time += c_times.user
+                        temp_sys_time += c_times.system
+
+                        switches = p.num_ctx_switches()
+                        temp_v_switches += switches.voluntary
+                        temp_iv_switches += switches.involuntary
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        # Process might have ended between gathering the list
+                        # and inspection
+                        continue
+
+                if current_mem_sum > peak_mem:
+                    peak_mem = current_mem_sum
+
+                # Update the last known good statistics
+                last_cpu_times = (temp_user_time, temp_sys_time)
+                last_switches = (temp_v_switches, temp_iv_switches)
+
+                timestamps.append(current_time)
+                cpu_history.append(current_cpu_sum)
+                mem_history.append(current_mem_sum)
+
                 data_queue.put_nowait(
                     {
                         "kind": "live",
@@ -144,32 +174,40 @@ def data_producer(cmd_list: Any):
                         ],
                     }
                 )
+            except psutil.NoSuchProcess:
+                break
             except queue.Full:
                 pass
 
             time.sleep(0.5)
-        stdout, stderr = proc.communicate(timeout=1)
+        try:
+            stdout, stderr = proc.communicate(timeout=0.0)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "[didnt finish]", "[didnt finish]"
         total_duration = time.time() - start_time
 
         summary: StatData = {
             "kind": "summary",
             "payload": {
                 "duration": total_duration,
-                "user_time": getattr(cpu_times, "user", 0.0),
-                "sys_time": getattr(cpu_times, "system", 0.0),
+                "user_time": last_cpu_times[0] if last_cpu_times else 0.0,
+                "sys_time": last_cpu_times[1] if last_cpu_times else 0.0,
                 "peak_mem_mb": peak_mem,
-                "v_switches": getattr(switches, "voluntary", 0),
-                "iv_switches": getattr(switches, "involuntary", 0),
+                "v_switches": last_switches[0] if last_switches else 0,
+                "iv_switches": last_switches[1] if last_switches else 0,
                 "exit_code": proc.returncode,
                 "stdout": stdout,
                 "stderr": stderr,
             },
         }
         data_queue.put(summary)
+
+        if stop_event.is_set():
+            raise ExitEvent()
     except ExitEvent:
         print("Finished early...")
     finally:
-        cleanup_process_group(p)
+        cleanup_process_group(parent)
 
         proc.wait()
         data_queue.put(None)
