@@ -338,7 +338,7 @@ python3 -c 'import time; [2**i for i in range(100000)]'\
 "
         if len(sys.argv) > 1:
             print("Overwrite command")
-            cmd = " ".join(sys.argv[1:])
+            cmd = shlex.join(sys.argv[1:])
 
         dpg.add_input_text(
             label="Command",
