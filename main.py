@@ -1,4 +1,3 @@
-import fcntl
 import os
 import queue
 import shlex
@@ -334,11 +333,16 @@ def run_app():
         dpg.add_text("Process Telemetry")
 
         # UI Additions for dynamic restarts
+        cmd = "\
+python3 -c 'import time; [2**i for i in range(100000)]'\
+"
+        if len(sys.argv) > 1:
+            print("Overwrite command")
+            cmd = " ".join(sys.argv[1:])
+
         dpg.add_input_text(
             label="Command",
-            default_value="\
-python3 -c 'import time; [2**i for i in range(100000)]'\
-",
+            default_value=cmd,
             tag="cmd_input",
             width=1000,
         )
