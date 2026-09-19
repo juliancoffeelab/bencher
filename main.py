@@ -6,6 +6,7 @@ import subprocess
 import sys
 import threading
 import time
+from pathlib import Path
 from typing import Any, Literal, TypedDict
 
 import dearpygui.dearpygui as dpg  # type: ignore
@@ -162,7 +163,7 @@ def data_producer(cmd_list: Any):
                         switches = p.num_ctx_switches()
                         temp_v_switches += switches.voluntary
                         temp_iv_switches += switches.involuntary
-                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                    except psutil.NoSuchProcess, psutil.AccessDenied:
                         # Process might have ended between gathering the list
                         # and inspection
                         continue
@@ -295,7 +296,7 @@ def restart_process(_sender, _app_data, _user_data):
     current_thread.get().start()
 
 
-def run_app():
+def run_app(command: list[str]):
     """Main application loop."""
     initialize_gui()
 
@@ -336,9 +337,8 @@ def run_app():
         cmd = "\
 python3 -c 'import time; [2**i for i in range(100000)]'\
 "
-        if len(sys.argv) > 1:
-            print("Overwrite command")
-            cmd = shlex.join(sys.argv[1:])
+        if command:
+            cmd = shlex.join(command)
 
         dpg.add_input_text(
             label="Command",
@@ -439,10 +439,52 @@ python3 -c 'import time; [2**i for i in range(100000)]'\
     dpg.destroy_context()
 
 
-def main():
+def print_zsh_completion() -> None:
+    completion = Path(__file__).parent / "completions" / "_bencher"
+    print(completion.read_text(), end="")
+
+
+def main() -> int:
+    args = sys.argv[1:]
+
+    match args:
+        case ["-h" | "--help"]:
+            print(
+                """usage: bencher [-h] [--print-completion SHELL] [COMMAND [ARGUMENT ...]]
+
+Run a command and display its CPU and memory usage.
+
+positional arguments:
+  COMMAND             command to run (uses the built-in example if omitted)
+  ARGUMENT            argument passed to COMMAND
+
+options:
+  -h, --help                 show this help message and exit
+  --print-completion SHELL   print a completion script (supported: zsh)
+"""
+            )
+            return 0
+        case ["--print-completion", "zsh"]:
+            print_zsh_completion()
+            return 0
+        case ["--print-completion", shell]:
+            print(f"bencher: unsupported shell: {shell}", file=sys.stderr)
+            return 2
+        case ["--print-completion", *_]:
+            print(
+                "bencher: option --print-completion requires exactly one argument: SHELL",
+                file=sys.stderr,
+            )
+            return 2
+        case [option, *_] if option.startswith("-"):
+            print(f"bencher: unknown option: {option}", file=sys.stderr)
+            print("Try 'bencher --help' for more information.", file=sys.stderr)
+            return 2
+
     print("Hello from bencher")
-    run_app()
+    run_app(args)
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
