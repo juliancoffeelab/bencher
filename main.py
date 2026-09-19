@@ -439,9 +439,19 @@ python3 -c 'import time; [2**i for i in range(100000)]'\
     dpg.destroy_context()
 
 
-def print_zsh_completion() -> None:
-    completion = Path(__file__).parent / "completions" / "_bencher"
+def print_completion(shell: str) -> int:
+    match shell:
+        case "zsh":
+            filename = "_bencher"
+        case "fish":
+            filename = "bencher.fish"
+        case _:
+            print(f"bencher: unsupported shell: {shell}", file=sys.stderr)
+            return 2
+
+    completion = Path(__file__).parent / "completions" / filename
     print(completion.read_text(), end="")
+    return 0
 
 
 def main() -> int:
@@ -460,16 +470,12 @@ positional arguments:
 
 options:
   -h, --help                 show this help message and exit
-  --print-completion SHELL   print a completion script (supported: zsh)
+  --print-completion SHELL   print a completion script (supported: zsh, fish)
 """
             )
             return 0
-        case ["--print-completion", "zsh"]:
-            print_zsh_completion()
-            return 0
         case ["--print-completion", shell]:
-            print(f"bencher: unsupported shell: {shell}", file=sys.stderr)
-            return 2
+            return print_completion(shell)
         case ["--print-completion", *_]:
             print(
                 "bencher: option --print-completion requires exactly one argument: SHELL",
