@@ -26,6 +26,12 @@ Fish loads completions from `~/.config/fish/completions`:
 bencher --print-completion fish > ~/.config/fish/completions/bencher.fish
 ```
 
+## Bash completions
+My Bash config sources files from `~/.config/bash/completions`:
+```bash
+bencher --print-completion bash > ~/.config/bash/completions/bencher.bash
+```
+
 # Screenshots
 <img width="1022" height="650" alt="simple example of running Python Fibonacci script, shows cpu and memory" src="https://github.com/user-attachments/assets/c1704093-4205-41b0-9088-bf2cda734b2d" />
 <img width="991" height="621" alt="example of summary, shows total duration, peak memory and other stats" src="https://github.com/user-attachments/assets/f0a80b0e-8772-4c13-a49e-a4df834db64a" />

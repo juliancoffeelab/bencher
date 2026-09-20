@@ -1,7 +1,7 @@
 #compdef bencher
 
 _bencher_print_completion() {
-	_values 'shell' zsh fish
+	_values 'shell' zsh fish bash
 }
 
 _bencher() {

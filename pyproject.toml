@@ -27,6 +27,7 @@ packages = ["main.py"]
 [tool.hatch.build.targets.wheel.force-include]
 "completions/_bencher" = "completions/_bencher"
 "completions/bencher.fish" = "completions/bencher.fish"
+"completions/bencher.bash" = "completions/bencher.bash"
 
 [tool.mypy]
 python_version = 3.14

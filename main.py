@@ -445,6 +445,8 @@ def print_completion(shell: str) -> int:
             filename = "_bencher"
         case "fish":
             filename = "bencher.fish"
+        case "bash":
+            filename = "bencher.bash"
         case _:
             print(f"bencher: unsupported shell: {shell}", file=sys.stderr)
             return 2
@@ -470,7 +472,7 @@ positional arguments:
 
 options:
   -h, --help                 show this help message and exit
-  --print-completion SHELL   print a completion script (supported: zsh, fish)
+  --print-completion SHELL   print a completion script (supported: zsh, fish, bash)
 """
             )
             return 0

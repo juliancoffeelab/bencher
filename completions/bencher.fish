@@ -22,7 +22,7 @@ complete \
     --condition __fish_use_subcommand \
     --long-option print-completion \
     --exclusive \
-    --arguments 'zsh fish' \
+    --arguments 'zsh fish bash' \
     --description 'Print a shell completion script'
 
 # Delegate everything after the wrapped command to that command's completer.
