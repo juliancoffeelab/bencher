@@ -12,11 +12,7 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = [
-    "types-psutil>=7.2.2.20260130",
-    "mypy>=1.19.1",
-    "basedpyright>=1.38.2",
-]
+dev = ["types-psutil>=7.2.2.20260130", "mypy>=1.19.1", "basedpyright>=1.38.2"]
 
 [project.scripts]
 bencher = "main:main"
@@ -27,6 +23,11 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["main.py"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"completions/_bencher" = "completions/_bencher"
+"completions/bencher.fish" = "completions/bencher.fish"
+"completions/bencher.bash" = "completions/bencher.bash"
 
 [tool.mypy]
 python_version = 3.14

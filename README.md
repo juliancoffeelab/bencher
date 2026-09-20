@@ -3,12 +3,33 @@
 A simple gui program that allows you to spawn a command and track
 its resource usage (only CPU and Memory for now).
 
-Yes, heavily vibecoded.
+Yes, heavily vibecoded (the hard way, by copypasting from a chat :P).
 
 # Installation
 Use `uv tool`, or `pipx`
 ```bash
 uv tool install --from git+https://github.com/juliancoffeelab/bencher.git bencher
+```
+
+## Zsh completions
+We also have zsh completions.
+
+Please read how to install them in your ZSH configuration, in my case, it's
+this:
+```bash
+bencher --print-completion zsh > ~/.config/zsh/completions/_bencher
+```
+
+## Fish completions
+Fish loads completions from `~/.config/fish/completions`:
+```bash
+bencher --print-completion fish > ~/.config/fish/completions/bencher.fish
+```
+
+## Bash completions
+My Bash config sources files from `~/.config/bash/completions`:
+```bash
+bencher --print-completion bash > ~/.config/bash/completions/bencher.bash
 ```
 
 # Screenshots

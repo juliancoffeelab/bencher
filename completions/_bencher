@@ -1,0 +1,28 @@
+#compdef bencher
+
+_bencher_print_completion() {
+	_values 'shell' zsh fish bash
+}
+
+_bencher() {
+	local curcontext="$curcontext" state state_descr line
+	local -A opt_args
+
+	# Parse Bencher's options before handing remaining arguments to the command.
+	_arguments -C \
+		'(- *)'{-h,--help}'[show help]' \
+		'(- *)--print-completion[print a shell completion script]:shell:_bencher_print_completion' \
+		'1:command:_command_names' \
+		'*::argument:->command_args' && return
+
+	case $state in
+	command_args)
+		# The double-colon spec makes the wrapped command word 1 for _normal.
+		#
+		# This also makes it work to delegate command completions!!!
+		_normal
+		;;
+	esac
+}
+
+_bencher "$@"
